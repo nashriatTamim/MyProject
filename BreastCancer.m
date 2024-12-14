@@ -7,100 +7,80 @@ rng default;    %Ensure repeatable results
 
 %% Load Partitioned data
 train_Data = readtable("Partitionedtrainset2.csv");
-test_Data = readtable("Partitionedtestset2.csv");
 
 head(train_Data)
 train_Data.Properties.VariableNames
 
 train_Data = table2array(train_Data); % Converts table to matrix
-test_Data = table2array(test_Data);
+%test_Data = table2array(test_Data);
 
 % Split features (X) and target variable (Y)
 X_Train = train_Data(:, 1:14);  % Features from training data
 Y_Train = train_Data (:,15);
-X_Test = test_Data (:,1:14);
-Y_Test = test_Data (:,15);
+%X_Test = test_Data (:,1:14);
+%Y_Test = test_Data (:,15);
 
 % Train Logistic Regression Model
 logisticModel = fitglm(X_Train, Y_Train, 'Distribution', 'binomial'); % Logistic Regression
 
 % Predict using Logistic Regression
-predictionsLogistic = predict(logisticModel, X_Test);
-predictionsLogistic = round(predictionsLogistic); % Convert probabilities to 0 or 1
+%predictionsLogistic = predict(logisticModel, X_Test);
+%predictionsLogistic = round(predictionsLogistic); % Convert probabilities to 0 or 1
 
-% Evaluate Logistic Regression Model
-accuracyLogistic = sum(predictionsLogistic == Y_Test) / length(Y_Test) * 100;
-disp(['Logistic Regression Accuracy: ', num2str(accuracyLogistic), '%']);
+save('logisticModel')
 
-% Confusion Matrices
-disp('Confusion Matrix for Logistic Regression:');
-confusionchart(Y_Test, predictionsLogistic);
-
-% Compute confusion matrix
-confusionMatrix = confusionmat(Y_Test, predictionsLogistic);
-
-% Extract values from confusion matrix
-TP = confusionMatrix(2, 2); % True Positives
-TN = confusionMatrix(1, 1); % True Negatives
-FP = confusionMatrix(1, 2); % False Positives
-FN = confusionMatrix(2, 1); % False Negatives
-
-% Calculate performance metrics
-accuracy = (TP + TN) / (TP + TN + FP + FN);
-precision = TP / (TP + FP); % Handle division by zero
-recall = TP / (TP + FN); % Sensitivity
-F1_score = 2 * (precision * recall) / (precision + recall); % Harmonic mean
-
-% Display the results
-fprintf('Accuracy LR: %.2f%%\n', accuracy * 100);
-fprintf('Precision LR: %.2f\n', precision);
-fprintf('Recall LR: %.2f\n', recall);
-fprintf('F1-Score LR: %.2f\n', F1_score);
-
-% Assuming Y_Test (true labels) and Y_Prob (predicted probabilities)
-
-[X, Y, T, AUC] = perfcurve(Y_Test, predictionsLogistic, 1); % '1' indicates the positive class
-
-% Plot the ROC curve
+coefficients = logisticModel.Coefficients.Estimate;
+featureNames = {'concave_points_worst', 'perimeter_worst', 'concave_points_mean', 'radius_worst', 'perimeter_mean','area_worst', 'radius_mean', 'area_mean', 'concavity_mean', 'concavity_worst', 'compactness_worst', 'radius_se', 'perimeter_se', 'area_se'}; % Update as necessary
 figure;
-plot(X, Y, 'LineWidth', 2);
-xlabel('False Positive Rate');
-ylabel('True Positive Rate');
-title(['ROC Curve (AUC = ', num2str(AUC), ')']);
+bar(coefficients(2:end)); % Skip intercept
+set(gca, 'XTickLabel', featureNames, 'XTick', 1:numel(featureNames), 'XTickLabelRotation', 45);
+xlabel('Features');
+ylabel('Coefficient Value');
+title('Feature Importance (Logistic Regression)');
 grid on;
 
-% Train Random Forest Model
-randomForestModel = TreeBagger(100, X_Train, Y_Train, 'Method', 'classification', 'OOBPrediction', 'on');
+%% Manual K-Fold Cross-Validation for Logistic Regression
+k = 5; % Number of folds
+cv = cvpartition(Y_Train, 'KFold', k); % Create cross-validation partitions
 
-% Predict using Random Forest
-predictionsRF = str2double(predict(randomForestModel, X_Test)); % Convert predictions to numeric
+accuracy = zeros(k, 1); % To store accuracy for each fold
 
-% Evaluate Random Forest Model
-accuracyRF = sum(predictionsRF == Y_Test) / length(Y_Test) * 100;
-disp(['Random Forest Accuracy: ', num2str(accuracyRF), '%']);
+for i = 1:k
+    % Get training and validation indices for the current fold
+    trainIdx = training(cv, i);
+    valIdx = test(cv, i);
+    
+    % Split data into training and validation sets
+    X_TrainFold = X_Train(trainIdx, :);
+    Y_TrainFold = Y_Train(trainIdx);
+    X_ValFold = X_Train(valIdx, :);
+    Y_ValFold = Y_Train(valIdx);
+    
+    % Train logistic regression model
+    logisticModel = fitglm(X_TrainFold, Y_TrainFold, 'Distribution', 'binomial');
+    
+    % Predict on validation set
+    predictions = predict(logisticModel, X_ValFold);
+    predictions = round(predictions); % Convert probabilities to class labels (0 or 1)
+    
+    % Compute accuracy for this fold
+    accuracy(i) = sum(predictions == Y_ValFold) / numel(Y_ValFold) * 100;
+end
 
-disp('Confusion Matrix for Random Forest:');
-confusionchart(Y_Test, predictionsRF);
+% Compute and display overall cross-validation accuracy
+meanAccuracy = mean(accuracy);
+fprintf('Mean Cross-Validation Accuracy: %.2f%%\n', meanAccuracy);
 
-confusionMatrix = confusionmat(Y_Test, predictionsRF);
+figure;
+bar(1:k, accuracy, 'FaceColor', [0.2 0.6 0.8], 'EdgeColor', 'k'); % Create bar graph
+xlabel('Fold Number');
+ylabel('Accuracy (%)');
+title('Cross-Validation Accuracy');
+grid on;
+xticks(1:k); % Ensure ticks are at each fold
+ylim([min(accuracy) - 5, 100]); % Adjust y-axis for better visualization
 
-% Extract values from confusion matrix
-TP = confusionMatrix(2, 2); % True Positives
-TN = confusionMatrix(1, 1); % True Negatives
-FP = confusionMatrix(1, 2); % False Positives
-FN = confusionMatrix(2, 1); % False Negatives
-
-% Calculate performance metrics
-accuracy = (TP + TN) / (TP + TN + FP + FN);
-precision = TP / (TP + FP); % Handle division by zero
-recall = TP / (TP + FN); % Sensitivity
-F1_score = 2 * (precision * recall) / (precision + recall); % Harmonic mean
-
-% Display the results
-fprintf('Accuracy RF: %.2f%%\n', accuracy * 100);
-fprintf('Precision RF: %.2f\n', precision);
-fprintf('Recall RF: %.2f\n', recall);
-fprintf('F1-Score RF: %.2f\n', F1_score);
-
-
-
+% Annotate each bar with its accuracy value
+for i = 1:k
+    text(i, accuracy(i) + 1, sprintf('%.2f%%', accuracy(i)), 'HorizontalAlignment', 'center', 'FontSize', 10);
+end
